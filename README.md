@@ -20,10 +20,10 @@ for posting will be saved in the specified credentials file. Make sure
 the file is only accessible to people and processes you want to be
 able to tweet.
 
-To run planetfeed to update twitter, use `planetfeed
---credentials-file /path/to/file.txt`. planetfeed will fetch the
-latest Planet Lisp feed, fetch recent @planet_lisp tweets, and tweet
-any feed items that haven't been tweeted recently.
+To run planetfeed to update twitter, use `planetfeed --data-directory
+/path/to/data/directory --credentials-file
+/path/to/file.txt`. planetfeed will fetch the latest Planet Lisp feed
+and tweet any feed items that haven't been tweeted recently.
 
 ## Feedback
 

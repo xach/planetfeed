@@ -10,17 +10,22 @@
 (defun cli (argv)
   (sb-ext:disable-debugger)
   (let ((options (rest argv))
-        (credentials-file nil ))
+        (credentials-file nil)
+        (login nil))
     (loop
       (let ((option (pop options)))
         (cond ((null option)
                (unless credentials-file
                  (error "--credentials-file is required"))
-               (return (command-line-update credentials-file)))
+               (unless *data-directory*
+                 (error "--data-directory is required"))
+               (if login
+                   (return (twitter-login credentials-file))
+                   (return (command-line-update credentials-file))))
               ((equal option "--login")
-               (unless credentials-file
-                 (error "--credentials-file is required"))
-               (return (twitter-login credentials-file)))
+               (setf login t))
+              ((equal option "--data-directory")
+               (setf *data-directory* (pop options)))
               ((equal option "--credentials-file")
                (setf credentials-file (pop options)))
               (t
