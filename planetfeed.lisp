@@ -52,16 +52,26 @@
       (error "Not enough statuses to skip ~D of them" skip))
     (subseq statuses skip)))
 
-(defun postable-items (recent-tweets feed)
-  "Return all postable items from FEED that are not found in RECENT-TWEETS."
-  (let ((strings (mapcar #'chirp:text recent-tweets))
-        (items (westbrook:items feed)))
-    (when (< (length strings) (length items))
-      (error "Too few tweets to check against the feed items"))
-    (loop for item in items
-          for title = (westbrook::title item)
-          unless (member title strings :test 'prefixp)
-          collect item)))
+(defvar *data-directory* nil)
+
+(defun item-identifier (item)
+  "Return a text string usable to uniquely identify ITEM."
+  (ironclad:byte-array-to-hex-string
+   (ironclad:digest-sequence 'ironclad:sha1
+                             (babel:string-to-octets (item-tweet-text item)))))
+
+(defun item-storage-pathname (item)
+  (unless *data-directory*
+    (error "~S unset" '*data-directory*))
+  (let* ((id (item-identifier item))
+         (a (subseq id 0 1))
+         (b (subseq id 1 2))
+         (directory (list :relative a b)))
+    (merge-pathnames
+     (make-pathname :directory directory
+                    :name id
+                    :type "dat")
+     *data-directory*)))
 
 (defun item-tweet-text (item)
   (format nil "~A ~A"
@@ -77,13 +87,39 @@
             thing))))
     (chirp:statuses/update text)))
 
+(defun already-posted-error-p (error)
+  (and (typep error 'chirp-objects:oauth-request-error)
+       ;; Wotta nitemare!
+       (eql 187
+            (cdr
+             (assoc :code
+                    (first
+                     (cdr (assoc :errors (chirp:http-body error)))))))))
+
+(deftype already-posted-error ()
+  `(satisfies already-posted-error-p))
+
+(defun ensure-tweeted (item)
+  (let ((file (item-storage-pathname item)))
+    (ensure-directories-exist file)
+    (with-open-file (stream file :direction :output :if-exists nil)
+      (cond (stream
+             (handler-case
+                 (let* ((status (tweet item))
+                        (id (chirp:id status)))
+                   (prin1 id stream)
+                   status)
+               (already-posted-error ()
+                 (prin1 -1 stream)
+                 -1)))
+            (t
+             nil)))))
+
 ;;; Now do the thing
 
 (defun update-twitter ()
-  (let* ((feed (latest-feed))
-         (tweets (latest-tweets :count (* (length (westbrook:items feed))
-                                          2)))
-         (postable (postable-items tweets feed)))
-    (dolist (item postable)
-      (format t "Posting ~A...~%" item)
-      (tweet item))))
+  (let* ((feed (latest-feed)))
+    (dolist (item (westbrook:items feed))
+      (let ((status (ensure-tweeted item)))
+        (when status
+          (format t "Posted ~A...~%" item))))))
