@@ -177,7 +177,7 @@
 ;;; Now do the thing
 
 (defun update-twitter ()
-  (let* ((feed (latest-feed)))
+  (let* ((feed (latest-github-feed)))
     (dolist (item (westbrook:items feed))
       (let ((status (ensure-tweeted item)))
         (when status
