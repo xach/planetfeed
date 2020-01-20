@@ -6,6 +6,8 @@
 (in-package #:planetfeed)
 
 (defvar *feed-url* "http://planet.lisp.org/rss20.xml")
+(defvar *github-feed-url* "http://planet.lisp.org/github.atom")
+(defvar *max-tweet-length* 240)
 
 (defbinder planet-feed
   ("rss"
@@ -23,7 +25,24 @@
       ("description" (bind :description))
       ("pubDate" (bind :pub-date)))))))
 
-(defun latest-feed ()
+(defbinder github-atom-binder
+  ("feed"
+   ("id")
+   ("updated")
+   ("title" (bind :title))
+   (sequence
+    :items
+    ("entry"
+     ("title" (bind :title))
+     ("author"
+      ("name"))
+     ("link" (attributes "href" :link))
+     ("id" (bind :guid))
+     ("published" (bind :pub-date))
+     ("updated")
+     ("content" (bind :description))))))
+
+(defun latest-planet-feed ()
   (let* ((data (drakma:http-request *feed-url*))
          (bindings (xml-bind 'planet-feed data))
          (feed (make-instance 'westbrook:feed
@@ -40,6 +59,30 @@
                         'westbrook:item
                         (alexandria:alist-plist item-alist))))
              raw-items)))
+      (setf (westbrook:items feed) items)
+      feed)))
+
+(defun latest-github-feed ()
+  (let* ((data (drakma:http-request *github-feed-url*))
+         (bindings (xml-bind 'github-atom-binder data))
+         (feed (make-instance 'westbrook:feed
+                              :title (bvalue :title bindings)
+                              :link "none")))
+    (let* ((raw-items (bvalue :items bindings))
+           (items
+             (mapcar
+              (lambda (item-alist)
+                (let ((description (assoc :description item-alist)))
+                  (setf (cdr description)
+                        (string-trim '(#\Space #\Newline)
+                                     (cdr description))))
+                (let ((date-entry (assoc :pub-date item-alist)))
+                  (setf (cdr date-entry)
+                        (parse-date (cdr date-entry)))
+                  (apply #'make-instance
+                         'westbrook:item
+                         (alexandria:alist-plist item-alist))))
+              raw-items)))
       (setf (westbrook:items feed) items)
       feed)))
 
@@ -73,10 +116,26 @@
                     :type "dat")
      *data-directory*)))
 
+(defun nonempty-text-p (text)
+  (and (plusp (length text))
+       text))
+
+(defun clamp-text-to (text length)
+  (if (<= (length text) length)
+      text
+      (subseq text 0 length)))
+
 (defun item-tweet-text (item)
-  (format nil "~A ~A"
-          (westbrook::title item)
-          (westbrook::link item)))
+  (let* ((max-length (- *max-tweet-length*
+                        (length (westbrook::title item))
+                        (length (westbrook::link item))))
+         (text
+           (format nil "~A~@[ — ~A~] ~A"
+                  (westbrook::title item)
+                  (clamp-text-to (nonempty-text-p (westbrook::description item))
+                                 max-length)
+                  (westbrook::link item))))
+    text))
 
 (defun tweet (thing)
   (let ((text

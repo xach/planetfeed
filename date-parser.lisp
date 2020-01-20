@@ -131,6 +131,8 @@ form."
 
 (defun parse-date (date)
   (date-parser date
+    ("9999-99-99T99:99:99 "
+     (year month day hour minute second))
     ("9 ZZZ 9999 99:99:99 +9999"
      (day month-name year hour minute second zone))
     ("99 ZZZ 99 99:99:99 GMT"

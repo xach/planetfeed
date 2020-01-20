@@ -212,6 +212,21 @@ element-name/element-content data."
              (acons key (collect-rest-alist source) bindings)
              k)))
 
+(defun create-attributes-binder (attributes kk)
+  (let ((attributes
+          (loop for (name keyword) on attributes by #'cddr
+                collect (cons name keyword))))
+    (lambda (source bindings k)
+      (klacks:map-attributes
+       (lambda (namespace local-name qname value explicitp)
+         (declare (ignore namespace qname explicitp))
+         (let ((entry (assoc local-name attributes :test 'string=)))
+           (unless entry (error "Missing attribute ~S" local-name))
+           (let ((keyword (cdr entry)))
+             (push (cons keyword value) bindings))))
+       source)
+      (funcall kk source bindings k))))
+
 (defun create-optional-binder (subforms kk)
   (let ((binder (create-binder subforms kk)))
     (lambda (source bindings k)
@@ -253,6 +268,8 @@ etc."
      (destructuring-bind (key subforms)
          (rest form)
        (create-sequence-binder key subforms k)))
+    (attributes
+     (create-attributes-binder (rest form) k))
     (elements-alist
      (create-alist-binder (second form) k))))
 
