@@ -106,10 +106,10 @@ alist of element names and their character contents."
 
 (defvar *current-element-name*)
 
-(defun create-element-start-matcher (element-name kk)
+(defun create-element-start-matcher (element-name k)
   "Return a function that expects to see the start of ELEMENT-NAME
 next in SOURCE."
-  (lambda (source bindings k)
+  (lambda (source bindings)
     (skip-characters source)
     (multiple-value-bind (type uri lname qname)
         (klacks:peek source)
@@ -123,12 +123,12 @@ next in SOURCE."
                :expected (list :start-element element-name)
                :actual (list type lname)))
       (klacks:consume source)
-      (funcall kk source bindings k))))
+      (funcall k source bindings))))
 
-(defun create-element-end-matcher (element-name kk)
+(defun create-element-end-matcher (element-name k)
   "Return a function that expects to see the end of ELEMENT-NAME next in
 SOURCE."
-  (lambda (source bindings k)
+  (lambda (source bindings)
     (skip-characters source)
     (multiple-value-bind (type uri lname qname)
         (klacks:peek source)
@@ -142,22 +142,21 @@ SOURCE."
                :expected (list :end-element element-name)
                :actual (list type lname)))
       (klacks:consume source)
-      (funcall kk source bindings k))))
+      (funcall k source bindings))))
 
-(defun create-bindings-extender (key kk)
+(defun create-bindings-extender (key k)
   "Return a function that extends BINDINGS with KEY and a value of
 whatever character data is pending in SOURCE."
-  (lambda (source bindings k)
-    (funcall kk source
-             (acons key (collect-characters source) bindings)
-             k)))
+  (lambda (source bindings)
+    (funcall k source
+             (acons key (collect-characters source) bindings))))
 
-(defun create-skipper (element-name kk)
+(defun create-skipper (element-name k)
   "Return a function that skips input in SOURCE until it sees a
 closing tag for ELEMENT-NAME. Nested occurrences of elements with the
 same ELEMENT-NAME are also skipped."
   (let ((depth 0))
-    (lambda (source bindings k)
+    (lambda (source bindings)
       (loop
        (multiple-value-bind (type uri lname)
            (klacks:consume source)
@@ -165,7 +164,7 @@ same ELEMENT-NAME are also skipped."
          (cond ((and (eql type :end-element)
                      (string= lname element-name))
                 (if (zerop depth)
-                    (return (funcall kk source bindings k))
+                    (return (funcall k source bindings))
                     (decf depth)))
                ((and (eql type :start-element)
                      (string= lname element-name))
@@ -174,8 +173,8 @@ same ELEMENT-NAME are also skipped."
 (defun create-bindings-returner ()
   "Return a function that does nothing but return its BINDINGS,
 effectively ending matching."
-  (lambda (source bindings k)
-    (declare (ignore source k))
+  (lambda (source bindings)
+    (declare (ignore source))
     (nreverse bindings)))
 
 (defmacro catching-xml-errors (&body body)
@@ -184,39 +183,37 @@ effectively ending matching."
      (xml-binding-error (c)
        (values nil c))))
 
-(defun create-sequence-binder (key forms kk)
+(defun create-sequence-binder (key forms k)
   "Return a function that creates a list of sub-bindings based on a
 sub-matcher, with KEY as the key."
   (let ((binder (create-binder forms (create-bindings-returner))))
-    (lambda (source bindings k)
+    (lambda (source bindings)
       (let ((sub-bindings '()))
         (loop
           (skip-characters source)
           (multiple-value-bind (sub-binding failure)
               (catching-xml-errors
-                (funcall binder source nil k))
+                (funcall binder source nil))
             (if failure
-                (return (funcall kk
+                (return (funcall k
                                  source
                                  (acons key
                                         (nreverse sub-bindings)
-                                        bindings)
-                                 k))
+                                        bindings)))
                 (push sub-binding sub-bindings))))))))
 
-(defun create-alist-binder (key kk)
+(defun create-alist-binder (key k)
   "Return a function that returns the rest of SOURCE as an alist of
 element-name/element-content data."
-  (lambda (source bindings k)
-    (funcall kk source
-             (acons key (collect-rest-alist source) bindings)
-             k)))
+  (lambda (source bindings)
+    (funcall k source
+             (acons key (collect-rest-alist source) bindings))))
 
-(defun create-attributes-binder (attributes kk)
+(defun create-attributes-binder (attributes k)
   (let ((attributes
           (loop for (name keyword) on attributes by #'cddr
                 collect (cons name keyword))))
-    (lambda (source bindings k)
+    (lambda (source bindings)
       (klacks:map-attributes
        (lambda (namespace local-name qname value explicitp)
          (declare (ignore namespace qname explicitp))
@@ -225,35 +222,35 @@ element-name/element-content data."
            (let ((keyword (cdr entry)))
              (push (cons keyword value) bindings))))
        source)
-      (funcall kk source bindings k))))
+      (funcall k source bindings))))
 
-(defun create-optional-binder (subforms kk)
-  (let ((binder (create-binder subforms kk)))
-    (lambda (source bindings k)
+(defun create-optional-binder (subforms k)
+  (let ((binder (create-binder subforms k)))
+    (lambda (source bindings)
       (skip-characters source)
       (multiple-value-bind (optional-bindings failure)
-          (catching-xml-errors (funcall binder source bindings k))
+          (catching-xml-errors (funcall binder source bindings))
         (if failure
-            (funcall kk source bindings k)
+            (funcall k source bindings)
             optional-bindings)))))
 
-(defun create-alternate-binder (subforms kk)
-  (let ((binders (mapcar (lambda (form) (create-binder form kk)) subforms)))
-    (lambda (source bindings k)
+(defun create-alternate-binder (subforms k)
+  (let ((binders (mapcar (lambda (form) (create-binder form k)) subforms)))
+    (lambda (source bindings)
       ;; FIXME: This xml-binding-error needs :expected and :action
       ;; ooptions. Can get actual with peeking and expected by getting
       ;; the cl:cars of subforms...maybe.
       (dolist (binder binders (error 'xml-binding-error))
         (multiple-value-bind (alt-bindings failure)
-            (catching-xml-errors (funcall binder source bindings k))
+            (catching-xml-errors (funcall binder source bindings))
           (unless failure
             (return alt-bindings)))))))
 
-(defun create-sub-binder-binder (binder-name kk)
-  (lambda (source bindings k)
+(defun create-sub-binder-binder (binder-name k)
+  (lambda (source bindings)
     (let ((binder (find-binder binder-name)))
       (let ((sub-bindings (funcall (closure binder) source)))
-        (funcall k source (append sub-bindings bindings) kk)))))
+        (funcall k source (append sub-bindings bindings))))))
 
 (defun create-special-processor (operator form k)
   "Handle special pattern processing forms like BIND, SKIP-REST, SEQUENCE,
@@ -296,14 +293,13 @@ process an XML source."
     (t (cxml:make-source source))))
 
 (defun make-binder (form)
-  (let ((binder (create-binder form (create-bindings-returner))))
+  (let ((binder (create-binder form)))
     (lambda (source)
       (let ((source (xml-source source)))
         (skip-document-start source)
         (funcall binder
                  source
-                 nil
-                 (create-bindings-returner))))))
+                 nil)))))
 
 
 
